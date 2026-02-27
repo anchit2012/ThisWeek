@@ -243,7 +243,7 @@ export default function App() {
               Set a saving target. Unspent pocket money automatically gets added here every Monday!
             </p>
             <input
-              placeholder="What are you saving for? (e.g. Shoes)"
+              placeholder="What are you saving for? (e.g. Kanye Tix)"
               value={goalTitle}
               onChange={(e) => setGoalTitle(e.target.value)}
               className="w-full px-4 py-3 border rounded-xl"
