@@ -5,7 +5,7 @@ import path from 'path'
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [react()],
-  base: '/your-repo-name/',  // ← CRITICAL: Replace with your actual repo name
+  base: 'ThisWeek',  // ← CRITICAL: Replace with your actual repo name
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
