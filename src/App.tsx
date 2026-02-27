@@ -1,6 +1,6 @@
 // This Week - Stable Utility First Version
 import React, { useState, useEffect, useMemo } from "react";
-import { motion, AnimatePresence, useSpring, useMotionValue } from "framer-motion";
+import { motion, AnimatePresence, useSpring, useMotionValue, useTransform } from "framer-motion";
 
 interface Expense {
   id: string;
@@ -40,11 +40,21 @@ const autoCategory = (title: string) => {
 };
 
 export default function App() {
-  const [page, setPage] = useState<Page>("onboarding");
-  const [name, setName] = useState("");
-  const [pocketMoney, setPocketMoney] = useState(0);
-  const [expenses, setExpenses] = useState<Expense[]>([]);
-  const [goal, setGoal] = useState<Goal | null>(null);
+  // 1. Lazy Initialization: Load directly from localStorage on the very first render.
+  // This prevents the "flash of 0" glitch and stops the app from accidentally overwriting data.
+  const [name, setName] = useState(() => localStorage.getItem("tw-name") || "");
+  const [pocketMoney, setPocketMoney] = useState(() => Number(localStorage.getItem("tw-pocket")) || 0);
+  const [page, setPage] = useState<Page>(() => localStorage.getItem("tw-name") ? "home" : "onboarding");
+  
+  const [weeklyIncome, setWeeklyIncome] = useState(() => Number(localStorage.getItem("tw-weekly-income")) || 0);
+  const [expenses, setExpenses] = useState<Expense[]>(() => {
+    const saved = localStorage.getItem("tw-expenses");
+    return saved ? JSON.parse(saved) : [];
+  });
+  const [goal, setGoal] = useState<Goal | null>(() => {
+    const saved = localStorage.getItem("tw-goal");
+    return saved ? JSON.parse(saved) : null;
+  });
 
   const [title, setTitle] = useState("");
   const [amount, setAmount] = useState("");
@@ -53,51 +63,44 @@ export default function App() {
   const [goalTarget, setGoalTarget] = useState("");
   const [goalDeadline, setGoalDeadline] = useState("");
 
-  /* ---------------- Load ---------------- */
+  const [showIncomeInput, setShowIncomeInput] = useState(false);
+  const [incomeInput, setIncomeInput] = useState("");
+
+  /* ---------------- Load & Reset ---------------- */
 
   useEffect(() => {
-    const savedName = localStorage.getItem("tw-name");
-    const savedPocket = localStorage.getItem("tw-pocket");
-    const savedExpenses = localStorage.getItem("tw-expenses");
-    const savedGoal = localStorage.getItem("tw-goal");
-    const lastReset = localStorage.getItem("tw-reset");
-
-    if (savedName && savedPocket) {
-      setName(savedName);
-      setPocketMoney(Number(savedPocket));
-      setPage("home");
-    }
-
-    if (savedExpenses) setExpenses(JSON.parse(savedExpenses));
-    if (savedGoal) setGoal(JSON.parse(savedGoal));
-
     // Weekly reset (safe + deterministic)
+    const lastReset = localStorage.getItem("tw-reset");
     const monday = getMonday();
+    
+    // Only runs if a new Monday has passed since last reset
     if (!lastReset || new Date(lastReset) < monday) {
-      const prevExpenses: Expense[] = savedExpenses ? JSON.parse(savedExpenses) : [];
-      const totalSpent = prevExpenses.reduce((s, e) => s + e.amount, 0);
-      const leftover = Number(savedPocket || 0) - totalSpent;
+      const totalSpent = expenses.reduce((s, e) => s + e.amount, 0);
+      const leftover = pocketMoney + weeklyIncome - totalSpent;
 
-      if (savedGoal && leftover > 0) {
-        const parsedGoal: Goal = JSON.parse(savedGoal);
-        parsedGoal.saved += leftover;
-        localStorage.setItem("tw-goal", JSON.stringify(parsedGoal));
-        setGoal(parsedGoal);
+      if (goal && leftover > 0) {
+        setGoal({ ...goal, saved: goal.saved + leftover });
       }
 
-      localStorage.setItem("tw-expenses", JSON.stringify([]));
-      localStorage.setItem("tw-reset", new Date().toISOString());
       setExpenses([]);
+      setWeeklyIncome(0);
+      localStorage.setItem("tw-reset", new Date().toISOString());
     }
-  }, []);
+  }, []); // Empty dependency array -> Only runs once on app open
 
+  // Auto-save effects (Now 100% safe because the state starts with the correct data)
   useEffect(() => {
     localStorage.setItem("tw-expenses", JSON.stringify(expenses));
   }, [expenses]);
 
   useEffect(() => {
     if (goal) localStorage.setItem("tw-goal", JSON.stringify(goal));
+    else localStorage.removeItem("tw-goal");
   }, [goal]);
+
+  useEffect(() => {
+    localStorage.setItem("tw-weekly-income", weeklyIncome.toString());
+  }, [weeklyIncome]);
 
   /* ---------------- Calculations ---------------- */
 
@@ -106,10 +109,13 @@ export default function App() {
     [expenses]
   );
 
-  const remaining = Math.max(pocketMoney - totalSpent, 0);
+  const remaining = Math.max(pocketMoney + weeklyIncome - totalSpent, 0);
 
   const motionValue = useMotionValue(remaining);
   const spring = useSpring(motionValue, { stiffness: 140, damping: 25 });
+  
+  // Create a live-updating display value that tracks the spring
+  const displayRemaining = useTransform(spring, (val) => `₹${Math.round(val)}`);
 
   useEffect(() => {
     motionValue.set(remaining);
@@ -344,11 +350,52 @@ export default function App() {
         </button>
       </div>
 
-      <div className="p-5 rounded-2xl border">
-        <p className="text-sm text-gray-500">Remaining This Week</p>
+      <div className="p-5 rounded-2xl border bg-gray-50">
+        <div className="flex justify-between items-center mb-1">
+          <p className="text-sm text-gray-500">Remaining This Week</p>
+          <button
+            onClick={() => setShowIncomeInput(!showIncomeInput)}
+            className="p-1 bg-white hover:bg-gray-100 rounded-full border shadow-sm transition"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4 text-gray-700">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+            </svg>
+          </button>
+        </div>
         <motion.h2 className="text-3xl font-bold">
-          ₹{spring.get().toFixed(0)}
+          {displayRemaining}
         </motion.h2>
+
+        <AnimatePresence>
+          {showIncomeInput && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: "auto", opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              className="mt-4 flex gap-2 overflow-hidden"
+            >
+              <input
+                type="number"
+                placeholder="Extra income (₹)"
+                value={incomeInput}
+                onChange={(e) => setIncomeInput(e.target.value)}
+                className="w-full px-3 py-2 border rounded-xl text-sm"
+              />
+              <button
+                onClick={() => {
+                  if (incomeInput) {
+                    setWeeklyIncome(prev => prev + Number(incomeInput));
+                    setIncomeInput("");
+                    setShowIncomeInput(false);
+                  }
+                }}
+                className="px-4 py-2 bg-black text-white rounded-xl text-sm font-medium whitespace-nowrap"
+              >
+                Add
+              </button>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
 
       {/* Common Expenses */}
